@@ -1,7 +1,9 @@
 # clobber
 A service for determining if GPUs are in use
 
-Have your users made it a habbit of starving eachother's GPU workloads of memory? Do you want that to not happen?
+<img src="https://forthebadge.com/images/badges/made-with-rust.svg/" height=32> <img src="https://forthebadge.com/images/badges/built-with-resentment.svg" height=32/> <img src="https://forthebadge.com/images/badges/reading-6th-grade-level.svg" height=32/>
+
+Have your users made it a habit of starving eachother's GPU workloads of memory? Do you want that to not happen?
 
 Well, too bad. I'm not there yet. (🚧 This app is still in development 🚧) But, I did create a thingy that will tell your users to be polite!
 
