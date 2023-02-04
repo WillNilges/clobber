@@ -96,7 +96,8 @@ fn who_is_using_what(processes: &Vec<GPUprocess>) {
 
 // Look through the list of processes, find processes
 // that are running on the same GPU, note the names.
-fn print_warnings(processes: &Vec<GPUprocess>) {
+fn print_warnings(processes: &Vec<GPUprocess>) -> bool {
+    let mut warned = false;
     // List of GPUs that have multiple processes running on them
     // let mult_proc: Vec<(usize, Vec<String>)> = vec![];
     // We can count on processes being sorted, since we go through the GPU IDs sequentially
@@ -106,18 +107,22 @@ fn print_warnings(processes: &Vec<GPUprocess>) {
     }
 
     for (gpu_num, mut names) in mult_proc {
-        println!(
-                "{} {}",
-                "WARNING! MULTIPLE PROCESSES DETECTED ON GPU".red().bold(), gpu_num.to_string().red().bold()
-            );
+        if names.len() > 1 {
+            println!(
+                    "{} {}",
+                    "WARNING! MULTIPLE PROCESSES DETECTED ON GPU".red().bold(), gpu_num.to_string().red().bold()
+                );
 
-        // Delete duplicate names in case someone has multiple processes running
-        let mut uniques = HashSet::new();
-        names.retain(|e| uniques.insert(*e));
+            // Delete duplicate names in case someone has multiple processes running
+            let mut uniques = HashSet::new();
+            names.retain(|e| uniques.insert(*e));
 
-        println!("{}", "PLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red());
-        for user in names {
-            println!("- {}", user.red().bold());
+            println!("{}", "PLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red());
+            for user in names {
+                println!("- {}", user.red().bold());
+            }
+            warned = true; // If this does something, then don't run who_is_using_what
         }
     }
+    warned
 }
