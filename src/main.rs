@@ -8,10 +8,12 @@ fn main() -> Result<(), NvmlError> {
     let nvml = Nvml::init()?;
     let s = System::new_all();
 
+    println!("== CLOBBER ==");
     print_device_count(&nvml);
 
     let running_gpu_processes = get_processes(&nvml, s)?;
     banner_summary(&running_gpu_processes);
+    who_is_using_what(&running_gpu_processes);
     print_warnings(&running_gpu_processes);
     Ok(())
 }
@@ -58,26 +60,32 @@ fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, Nvm
 }
 
 fn banner_summary(processes: &Vec<GPUprocess>) {
-    println!("== CLOBBERING STATE mACHINE HOUSE ==");
-
     for proc in processes {
-        print!(
-                    "Found process \"{}\" ({}) on GPU {} started by ", 
-                    proc.name, proc.pid, proc.device_number
+        println!(
+                    "Found process \"{}\" ({}) on GPU {} started by {}!", 
+                    proc.name, proc.pid, proc.device_number, proc.user.red()
                 );
+    }
+}
 
-        println!("{}!", proc.user.red());
+fn who_is_using_what(processes: &Vec<GPUprocess>) {
+    for proc in processes {
+        println!(
+            "{} {} {}.", 
+             proc.user.yellow().bold(), 
+             "is currently using GPU".yellow(), 
+             proc.device_number.to_string().yellow().bold()
+         );
     }
 }
 
 fn print_warnings(processes: &Vec<GPUprocess>) {
     let mut gpus = vec![];
-    let mut users: Vec<String> = vec![];
     for proc in processes {
        if gpus.contains(&proc.device_number) {
             println!(
                 "{} {}",
-                "WARNING! MULTIPLE PROCESSES DETECTED ON GPU!".red().bold(), (proc.device_number.to_string()).red().bold()
+                "WARNING! MULTIPLE PROCESSES DETECTED ON GPU".red().bold(), (proc.device_number.to_string()).red().bold()
             );
        }
        gpus.push(proc.device_number);
