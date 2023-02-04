@@ -1,5 +1,5 @@
+use std::collections::HashMap;
 use nvml_wrapper::{Nvml,error::NvmlError};
-
 use users::get_user_by_uid;
 use sysinfo::{Pid, ProcessExt, System, SystemExt};
 use colored::Colorize;
@@ -72,6 +72,7 @@ fn banner_summary(processes: &Vec<GPUprocess>) {
 
 fn print_warnings(processes: &Vec<GPUprocess>) {
     let mut gpus = vec![];
+    let mut users: Vec<String> = vec![];
     for proc in processes {
        if gpus.contains(&proc.device_number) {
             println!(
@@ -81,6 +82,19 @@ fn print_warnings(processes: &Vec<GPUprocess>) {
        }
        gpus.push(proc.device_number);
     }
+
+    let mut map = HashMap::new();
+    for e in processes {
+        map.entry(e.device_number).or_insert(vec!()).push(e);
+    }
+    println!("{}", "PLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red());
+    for (size, item) in map {
+        if size > 1 { 
+            println!("- {}", item[0].user.red().bold());
+        }
+    }
+
+    //println!("PLEASE CONTACT THE FOLLOWING PEOPLE TO COORDINATE YOUR WORKLOAD: {:?}", map);
 }
 
 fn print_device_count(nvml: &Nvml) {
