@@ -1,21 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use nvml_wrapper::{Nvml,error::NvmlError};
 use users::get_user_by_uid;
 use sysinfo::{Pid, ProcessExt, System, SystemExt};
 use colored::Colorize;
+use clap::Parser;
 
-fn main() -> Result<(), NvmlError> {
-    let nvml = Nvml::init()?;
-    let s = System::new_all();
-
-    println!("== CLOBBER ==");
-    print_device_count(&nvml);
-
-    let running_gpu_processes = get_processes(&nvml, s)?;
-    banner_summary(&running_gpu_processes);
-    who_is_using_what(&running_gpu_processes);
-    print_warnings(&running_gpu_processes);
-    Ok(())
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[clap(long, short, action)]
+    summary: bool,
 }
 
 pub struct GPUprocess {
@@ -24,6 +18,20 @@ pub struct GPUprocess {
     device_number: usize,
     uid: usize,
     user: String
+}
+
+fn main() -> Result<(), NvmlError> {
+    let args = Args::parse();
+    let nvml = Nvml::init()?;
+    let s = System::new_all();
+
+    let running_gpu_processes = get_processes(&nvml, s)?;
+    if args.summary {
+        banner_summary(&nvml, &running_gpu_processes);
+    }
+    who_is_using_what(&running_gpu_processes);
+    print_warnings(&running_gpu_processes);
+    Ok(())
 }
 
 fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, NvmlError>{
@@ -59,7 +67,14 @@ fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, Nvm
     Ok(gpu_processes)
 }
 
-fn banner_summary(processes: &Vec<GPUprocess>) {
+fn print_device_count(nvml: &Nvml) {
+    let nvml_device_count = nvml.device_count().unwrap();
+    println!("Found {} devices.", nvml_device_count);
+}
+
+fn banner_summary(nvml: &Nvml, processes: &Vec<GPUprocess>) {
+    println!("== CLOBBER ==");
+    print_device_count(&nvml);
     for proc in processes {
         println!(
                     "Found process \"{}\" ({}) on GPU {} started by {}!", 
@@ -79,33 +94,30 @@ fn who_is_using_what(processes: &Vec<GPUprocess>) {
     }
 }
 
+// Look through the list of processes, find processes
+// that are running on the same GPU, note the names.
 fn print_warnings(processes: &Vec<GPUprocess>) {
-    let mut gpus = vec![];
-    for proc in processes {
-       if gpus.contains(&proc.device_number) {
-            println!(
-                "{} {}",
-                "WARNING! MULTIPLE PROCESSES DETECTED ON GPU".red().bold(), (proc.device_number.to_string()).red().bold()
-            );
-       }
-       gpus.push(proc.device_number);
+    // List of GPUs that have multiple processes running on them
+    // let mult_proc: Vec<(usize, Vec<String>)> = vec![];
+    // We can count on processes being sorted, since we go through the GPU IDs sequentially
+    let mut mult_proc = HashMap::new();
+    for e in processes {
+        mult_proc.entry(e.device_number).or_insert(vec!()).push(&e.user);
     }
 
-    let mut map = HashMap::new();
-    for e in processes {
-        map.entry(e.device_number).or_insert(vec!()).push(e);
-    }
-    println!("{}", "PLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red());
-    for (size, item) in map {
-        if size > 1 { 
-            println!("- {}", item[0].user.red().bold());
+    for (gpu_num, mut names) in mult_proc {
+        println!(
+                "{} {}",
+                "WARNING! MULTIPLE PROCESSES DETECTED ON GPU".red().bold(), gpu_num.to_string().red().bold()
+            );
+
+        // Delete duplicate names in case someone has multiple processes running
+        let mut uniques = HashSet::new();
+        names.retain(|e| uniques.insert(*e));
+
+        println!("{}", "PLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red());
+        for user in names {
+            println!("- {}", user.red().bold());
         }
     }
-
-    //println!("PLEASE CONTACT THE FOLLOWING PEOPLE TO COORDINATE YOUR WORKLOAD: {:?}", map);
-}
-
-fn print_device_count(nvml: &Nvml) {
-    let nvml_device_count = nvml.device_count().unwrap();
-    println!("Found {} devices.", nvml_device_count);
 }
