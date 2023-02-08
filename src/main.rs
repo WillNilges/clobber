@@ -28,8 +28,9 @@ fn main() -> Result<(), NvmlError> {
     let running_gpu_processes = get_processes(&nvml, s)?;
     if args.summary {
         banner_summary(&nvml, &running_gpu_processes);
+    } else {
+        who_is_using_what(&running_gpu_processes);
     }
-    who_is_using_what(&running_gpu_processes);
     print_warnings(&running_gpu_processes);
     Ok(())
 }
