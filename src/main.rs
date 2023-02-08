@@ -85,13 +85,14 @@ fn banner_summary(nvml: &Nvml, processes: &Vec<GPUprocess>) {
 }
 
 fn who_is_using_what(processes: &Vec<GPUprocess>) {
-    for proc in processes {
-        println!(
-            "{} {} {}.", 
-             proc.user.yellow().bold(), 
-             "is currently using GPU".yellow(), 
-             proc.device_number.to_string().yellow().bold()
-         );
+    let mut users = HashMap::new();
+    for e in processes {
+        users.entry(&e.user).or_insert(vec!()).push(&e.device_number);
+    }
+
+    for (user, gpus) in users {
+        let gpu_string = format!("{:?}", gpus);
+        println!("{} {} {}", user.yellow().bold(), "is currently using GPU(s)".yellow(), gpu_string.yellow().bold());
     }
 
     if processes.len() == 0 {
