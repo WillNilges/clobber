@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, process::{Command, Stdio}};
 use nvml_wrapper::{Nvml,error::NvmlError};
 use users::get_user_by_uid;
 use sysinfo::{Pid, ProcessExt, System, SystemExt};
@@ -34,6 +34,25 @@ fn main() -> Result<(), NvmlError> {
     print_warnings(&running_gpu_processes);
     Ok(())
 }
+
+fn write_to_user(user: String, message: String) {
+    let echo_child = Command::new("echo")
+        .arg(message)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to start echo process while writing to user");
+
+    let echo_out = echo_child.stdout.expect("Failed to open echo stdout");
+
+    let write_child = Command::new("write")
+        .arg(user)
+        .stdin(Stdio::from(echo_out))
+        .spawn()
+        .expect("Failed to start wall process while writing to user");
+
+    let _output = write_child.wait_with_output();
+}
+
 
 fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, NvmlError>{
     let nvml_device_count = nvml.device_count().unwrap();
@@ -134,6 +153,7 @@ fn print_warnings(processes: &Vec<GPUprocess>) -> bool {
             println!("{}", "PLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red());
             for user in names {
                 println!("- {}", user.red().bold());
+                write_to_user(user.to_string(), "WARNING! GPU COLLISION DETECTED!".to_string());
             }
             warned = true; // If this does something, then don't run show_usage
         }
