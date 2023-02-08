@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, process::{Command, Stdio}};
 use nvml_wrapper::{Nvml,error::NvmlError};
 use users::get_user_by_uid;
-use sysinfo::{Pid, ProcessExt, System, SystemExt};
+use sysinfo::{Pid, ProcessExt, System, SystemExt, Signal};
 use colored::Colorize;
 use clap::Parser;
 
@@ -12,11 +12,14 @@ struct Args {
     summary: bool,
     #[clap(long, short, action)]
     bug_users: bool,
+    #[clap(long, short, action)]
+    term_offenders: bool,
 }
 
 pub struct GPUprocess {
     name: String,
     pid: usize,
+    start_time: u64, 
     device_number: usize,
     uid: usize,
     user: String
@@ -25,9 +28,9 @@ pub struct GPUprocess {
 fn main() -> Result<(), NvmlError> {
     let args = Args::parse();
     let nvml = Nvml::init()?;
-    let s = System::new_all();
+    let mut s = System::new_all();
 
-    let running_gpu_processes = get_processes(&nvml, s)?;
+    let running_gpu_processes = get_processes(&nvml, &mut s)?;
     if args.summary {
         print_banner_summary(&nvml, &running_gpu_processes);
     } else {
@@ -35,6 +38,11 @@ fn main() -> Result<(), NvmlError> {
     }
 
     print_warnings(&running_gpu_processes, args.bug_users);
+
+    if args.term_offenders {
+        println!("Murder");
+        end_offenders(&mut s, &running_gpu_processes, Signal::Term);
+    }
     Ok(())
 }
 
@@ -59,7 +67,7 @@ fn write_to_user(user: String, message: String) {
 }
 
 // Query NVML for the processes running on all GPUs and build a list of them
-fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, NvmlError>{
+fn get_processes(nvml: &Nvml, system: &mut System) -> Result<Vec<GPUprocess>, NvmlError>{
     let nvml_device_count = nvml.device_count().unwrap();
     system.refresh_users_list();
     let mut gpu_processes = vec![];
@@ -67,11 +75,11 @@ fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, Nvm
         let device = nvml.device_by_index(device_number).unwrap();
         let nvml_processes = device.running_compute_processes_v2().unwrap();
         for proc in nvml_processes {
-            let gpu_process = proc.pid;
-            if let Some(process) = system.process(Pid::from(gpu_process as usize)) {
+            if let Some(process) = system.process(Pid::from(proc.pid as usize)) {
                 let mut gpu_process = GPUprocess {
                     name: process.name().to_string(),
-                    pid: gpu_process as usize,
+                    pid: proc.pid as usize,
+                    start_time: process.start_time(),
                     device_number: device_number as usize,
                     uid: 0,
                     user: "Unknown".to_string()
@@ -90,6 +98,32 @@ fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, Nvm
         }
     }
     Ok(gpu_processes)
+}
+
+fn end_offenders(system: &mut System, processes: &Vec<GPUprocess>, signal: Signal) {
+    let mut gpus = HashMap::new();
+    for e in processes {
+        gpus.entry(e.device_number).or_insert(vec!()).push(e);
+        println!("CHOM");
+    }
+
+    for (_gpu, processes) in gpus {
+        let oldest = processes.iter().max_by_key(|p| p.start_time).unwrap().start_time;
+        //let _ = processes.iter().filter(|p| p.start_time < oldest).map(|p| kill_process(system, p.pid, signal));
+        for process in processes {
+            if process.start_time < oldest {
+                kill_process(system, process.pid, signal);
+            }
+        }
+    }
+}
+
+fn kill_process(system: &mut System, pid: usize, signal: Signal) -> bool {
+    println!("Killing {}", pid);
+    if let Some(process) = system.process(Pid::from(pid)) {
+        process.kill_with(signal);
+    }
+    true
 }
 
 // Print number of devices (GPUs) installed in the system
