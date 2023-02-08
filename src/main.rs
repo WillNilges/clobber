@@ -27,9 +27,9 @@ fn main() -> Result<(), NvmlError> {
 
     let running_gpu_processes = get_processes(&nvml, s)?;
     if args.summary {
-        banner_summary(&nvml, &running_gpu_processes);
+        print_banner_summary(&nvml, &running_gpu_processes);
     } else {
-        who_is_using_what(&running_gpu_processes);
+        print_usage(&running_gpu_processes);
     }
     print_warnings(&running_gpu_processes);
     Ok(())
@@ -73,26 +73,34 @@ fn print_device_count(nvml: &Nvml) {
     println!("Found {} devices.", nvml_device_count);
 }
 
-fn banner_summary(nvml: &Nvml, processes: &Vec<GPUprocess>) {
+fn print_banner_summary(nvml: &Nvml, processes: &Vec<GPUprocess>) {
     println!("== CLOBBER ==");
     print_device_count(&nvml);
     for proc in processes {
         println!(
-                    "Found process \"{}\" ({}) on GPU {} started by {}!", 
-                    proc.name, proc.pid, proc.device_number, proc.user.red()
-                );
+            "Found process \"{}\" ({}) on GPU {} started by {}!", 
+            proc.name, proc.pid, proc.device_number, proc.user.red()
+        );
+    }
+    
+    if processes.len() == 0 {
+        println!("{}", "There are no running GPU processes.".green());
     }
 }
 
-fn who_is_using_what(processes: &Vec<GPUprocess>) {
+fn print_usage(processes: &Vec<GPUprocess>) {
     let mut users = HashMap::new();
     for e in processes {
-        users.entry(&e.user).or_insert(vec!()).push(&e.device_number);
+        users.entry(e.user.to_string()).or_insert(vec!()).push(&e.device_number);
     }
 
-    for (user, gpus) in users {
-        let gpu_string = format!("{:?}", gpus);
-        println!("{} {} {}", user.yellow().bold(), "is currently using GPU(s)".yellow(), gpu_string.yellow().bold());
+    for (user, mut gpus) in users {
+        let set: HashSet<_> = gpus.drain(..).collect(); // dedup
+        gpus.extend(set.into_iter());
+
+        let mut gpu_string = format!("{:?}", gpus);
+        gpu_string = gpu_string.trim_start_matches('[').trim_end_matches(']').to_string();
+        println!("{} {} {}", user.yellow().bold(), "is currently using GPUs".yellow(), gpu_string.yellow().bold());
     }
 
     if processes.len() == 0 {
@@ -105,8 +113,8 @@ fn who_is_using_what(processes: &Vec<GPUprocess>) {
 fn print_warnings(processes: &Vec<GPUprocess>) -> bool {
     let mut warned = false;
     // List of GPUs that have multiple processes running on them
-    // let mult_proc: Vec<(usize, Vec<String>)> = vec![];
-    // We can count on processes being sorted, since we go through the GPU IDs sequentially
+    // We can count on processes being sorted, since we go through the GPU IDs
+    // sequentially
     let mut mult_proc = HashMap::new();
     for e in processes {
         mult_proc.entry(e.device_number).or_insert(vec!()).push(&e.user);
@@ -127,7 +135,7 @@ fn print_warnings(processes: &Vec<GPUprocess>) -> bool {
             for user in names {
                 println!("- {}", user.red().bold());
             }
-            warned = true; // If this does something, then don't run who_is_using_what
+            warned = true; // If this does something, then don't run show_usage
         }
     }
     warned
