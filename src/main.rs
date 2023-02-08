@@ -93,6 +93,10 @@ fn who_is_using_what(processes: &Vec<GPUprocess>) {
              proc.device_number.to_string().yellow().bold()
          );
     }
+
+    if processes.len() == 0 {
+        println!("{}", "There are no running GPU processes.".green());
+    }
 }
 
 // Look through the list of processes, find processes
