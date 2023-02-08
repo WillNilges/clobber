@@ -10,6 +10,8 @@ use clap::Parser;
 struct Args {
     #[clap(long, short, action)]
     summary: bool,
+    #[clap(long, short, action)]
+    bug_users: bool,
 }
 
 pub struct GPUprocess {
@@ -31,10 +33,13 @@ fn main() -> Result<(), NvmlError> {
     } else {
         print_usage(&running_gpu_processes);
     }
-    print_warnings(&running_gpu_processes);
+
+    print_warnings(&running_gpu_processes, args.bug_users);
     Ok(())
 }
 
+// Use the `write` command to annoy a user with a message
+// FIXME: Get rid of `expect`s
 fn write_to_user(user: String, message: String) {
     let echo_child = Command::new("echo")
         .arg(message)
@@ -53,7 +58,7 @@ fn write_to_user(user: String, message: String) {
     let _output = write_child.wait_with_output();
 }
 
-
+// Query NVML for the processes running on all GPUs and build a list of them
 fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, NvmlError>{
     let nvml_device_count = nvml.device_count().unwrap();
     system.refresh_users_list();
@@ -87,11 +92,14 @@ fn get_processes(nvml: &Nvml, mut system: System) -> Result<Vec<GPUprocess>, Nvm
     Ok(gpu_processes)
 }
 
+// Print number of devices (GPUs) installed in the system
 fn print_device_count(nvml: &Nvml) {
     let nvml_device_count = nvml.device_count().unwrap();
     println!("Found {} devices.", nvml_device_count);
 }
 
+// Show a small banner, and print some more detailed info about what processes
+// are running on the GPU and who owns them
 fn print_banner_summary(nvml: &Nvml, processes: &Vec<GPUprocess>) {
     println!("== CLOBBER ==");
     print_device_count(&nvml);
@@ -107,6 +115,7 @@ fn print_banner_summary(nvml: &Nvml, processes: &Vec<GPUprocess>) {
     }
 }
 
+// Print matter-of-fact information about who is using what GPU
 fn print_usage(processes: &Vec<GPUprocess>) {
     let mut users = HashMap::new();
     for e in processes {
@@ -127,9 +136,9 @@ fn print_usage(processes: &Vec<GPUprocess>) {
     }
 }
 
-// Look through the list of processes, find processes
-// that are running on the same GPU, note the names.
-fn print_warnings(processes: &Vec<GPUprocess>) -> bool {
+// Print a scary warning about colliding GPU processes, and optionally, use
+// the `write` command to annoy the users directly
+fn print_warnings(processes: &Vec<GPUprocess>, bug_users: bool) -> bool {
     let mut warned = false;
     // List of GPUs that have multiple processes running on them
     // We can count on processes being sorted, since we go through the GPU IDs
@@ -158,9 +167,11 @@ fn print_warnings(processes: &Vec<GPUprocess>) -> bool {
 
             println!("{}", write_message);
             
-            let names_string = &format!("{:?}", names).trim_start_matches('[').trim_end_matches(']').to_string();
-            for user in &names {
-                write_to_user(user.to_string(), format!("WARNING! MULTIPLE PROCESSES DETECTED ON GPU {}\nPLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:\n{}", gpu_num.to_string(), names_string));
+            if bug_users {
+                let names_string = &format!("{:?}", names).trim_start_matches('[').trim_end_matches(']').to_string();
+                for user in &names {
+                    write_to_user(user.to_string(), format!("WARNING! MULTIPLE PROCESSES DETECTED ON GPU {}\nPLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:\n{}", gpu_num.to_string(), names_string));
+                }
             }
             warned = true; // If this does something, then don't run show_usage
         }
