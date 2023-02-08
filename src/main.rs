@@ -14,6 +14,8 @@ struct Args {
     bug_users: bool,
     #[clap(long, short, action)]
     term_offenders: bool,
+    #[clap(long, short, action)]
+    kill_offenders: bool,
 }
 
 pub struct GPUprocess {
@@ -40,8 +42,9 @@ fn main() -> Result<(), NvmlError> {
     print_warnings(&running_gpu_processes, args.bug_users);
 
     if args.term_offenders {
-        println!("Murder");
         end_offenders(&mut s, &running_gpu_processes, Signal::Term);
+    } else if args.kill_offenders {
+        end_offenders(&mut s, &running_gpu_processes, Signal::Kill);
     }
     Ok(())
 }
@@ -104,14 +107,12 @@ fn end_offenders(system: &mut System, processes: &Vec<GPUprocess>, signal: Signa
     let mut gpus = HashMap::new();
     for e in processes {
         gpus.entry(e.device_number).or_insert(vec!()).push(e);
-        println!("CHOM");
     }
 
     for (_gpu, processes) in gpus {
-        let oldest = processes.iter().max_by_key(|p| p.start_time).unwrap().start_time;
-        //let _ = processes.iter().filter(|p| p.start_time < oldest).map(|p| kill_process(system, p.pid, signal));
+        let oldest = processes.iter().min_by_key(|p| p.start_time).unwrap().start_time;
         for process in processes {
-            if process.start_time < oldest {
+            if process.start_time > oldest {
                 kill_process(system, process.pid, signal);
             }
         }
@@ -119,7 +120,7 @@ fn end_offenders(system: &mut System, processes: &Vec<GPUprocess>, signal: Signa
 }
 
 fn kill_process(system: &mut System, pid: usize, signal: Signal) -> bool {
-    println!("Killing {}", pid);
+    println!("{} {}", signal.to_string().red().bold(), pid.to_string().red().bold());
     if let Some(process) = system.process(Pid::from(pid)) {
         process.kill_with(signal);
     }
