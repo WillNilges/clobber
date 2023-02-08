@@ -140,8 +140,9 @@ fn print_warnings(processes: &Vec<GPUprocess>) -> bool {
     }
 
     for (gpu_num, mut names) in mult_proc {
+        let mut write_message: String;
         if names.len() > 1 {
-            println!(
+            write_message = format!(
                     "{} {}",
                     "WARNING! MULTIPLE PROCESSES DETECTED ON GPU".red().bold(), gpu_num.to_string().red().bold()
                 );
@@ -150,10 +151,16 @@ fn print_warnings(processes: &Vec<GPUprocess>) -> bool {
             let mut uniques = HashSet::new();
             names.retain(|e| uniques.insert(*e));
 
-            println!("{}", "PLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red());
-            for user in names {
-                println!("- {}", user.red().bold());
-                write_to_user(user.to_string(), "WARNING! GPU COLLISION DETECTED!".to_string());
+            write_message += &format!("{}", "\nPLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red()).to_string();
+            for user in &names {
+                write_message += &format!("\n- {}", user.red().bold());
+            }
+
+            println!("{}", write_message);
+            
+            let names_string = &format!("{:?}", names).trim_start_matches('[').trim_end_matches(']').to_string();
+            for user in &names {
+                write_to_user(user.to_string(), format!("WARNING! MULTIPLE PROCESSES DETECTED ON GPU {}\nPLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:\n{}", gpu_num.to_string(), names_string));
             }
             warned = true; // If this does something, then don't run show_usage
         }
