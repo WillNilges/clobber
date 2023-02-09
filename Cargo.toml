@@ -12,3 +12,11 @@ nvml-wrapper = {version = "0.9.0", features = ["legacy-functions"]}
 pretty-bytes = "0.2.2"
 sysinfo = "0.27.7"
 users = "0.11.0"
+
+[[bin]]
+name = "clobber"
+path = "src/clobber.rs"
+
+[[bin]]
+name = "clobberd"
+path = "src/clobberd.rs"
