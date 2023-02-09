@@ -114,6 +114,8 @@ fn gpu_watch() {
     let nvml_device_count = nvml.device_count().unwrap();
     let mut locks: Vec<Option<User>> = vec![None; nvml_device_count as usize];
 
+    println!("Started GPU watch");
+
     loop {
         system.refresh_processes_specifics(ProcessRefreshKind::everything());
         system.refresh_users_list();
@@ -121,15 +123,24 @@ fn gpu_watch() {
             let processes = get_processes(&nvml, &mut system, device_number).unwrap_or(vec![]);
             if processes.iter().filter(|p| p.user.uid != 0).count() == 0 {
                 locks[device_number as usize] = None;
+                println!("Released lock on GPU {}", device_number);
             } else {
                 for p in processes.iter() {
                     match &locks[device_number as usize] {
                         None => {
                             locks[device_number as usize] = Some(p.user.clone());
+                            println!(
+                                "User {} ({}) acquired lock on GPU {}",
+                                p.user.uid, p.user.name, device_number
+                            );
                         }
                         Some(current) => {
                             if current != &p.user {
                                 kill_process(&mut system, p.pid);
+                                println!(
+                                    "Killed process pid: {}, uid: {} ({})",
+                                    p.pid, p.user.uid, p.user.name
+                                );
                             }
                         }
                     }
