@@ -1,22 +1,21 @@
+use comms::Command::*;
+use comms::Response::*;
+use comms::{Command, Response, User};
 use nvml_wrapper::{error::NvmlError, Nvml};
 use std::io::prelude::*;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::{thread, time::Duration};
 use sysinfo::{Pid, ProcessExt, ProcessRefreshKind, Signal, System, SystemExt};
 use users::get_user_by_uid;
+
+mod comms;
 
 pub struct GPUprocess {
     name: String,
     pid: usize,
     device_number: usize,
     user: User,
-}
-
-#[derive(Clone, Eq)]
-pub struct User {
-    name: String,
-    uid: usize,
 }
 
 impl PartialEq for User {
@@ -65,22 +64,32 @@ fn kill_process(system: &mut System, pid: usize) -> bool {
         .is_some()
 }
 
-fn sock_communicate(socket: &mut UnixStream) {
-    let mut buf = String::with_capacity(1024);
-    match socket.read_to_string(&mut buf) {
-        Ok(_size) => {}
-        Err(e) => {
-            println!("Error reading from socket: {:?}", e);
+fn sock_communicate(command: Command) -> Response {
+    match command {
+        Status => GPUStatus { locks: vec![] },
+        _ => {
+            println!("Admin command received on public socket.");
+            Error("Operation not permitted, must be root.".to_string())
         }
     }
 }
 
-fn bind(path: impl AsRef<Path>) -> std::io::Result<UnixListener> {
+fn sock_admin_communicate(command: Command) -> Response {
+    match command {
+        Kill => {
+            println!("Received Kill command. Exiting.");
+            std::process::exit(0);
+        }
+        _ => sock_communicate(command),
+    }
+}
+
+fn bind(path: impl AsRef<Path>, public: bool) -> std::io::Result<UnixListener> {
     let path = path.as_ref();
     let _ = std::fs::remove_file(path);
     let ret = UnixListener::bind(path);
     #[cfg(unix)]
-    {
+    if public {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(
             path.to_str().unwrap(),
@@ -90,15 +99,52 @@ fn bind(path: impl AsRef<Path>) -> std::io::Result<UnixListener> {
     ret
 }
 
-fn sock_listen() {
-    let server_sock = bind("/run/clobberd.sock").unwrap();
-    println!("Started socket server");
+fn sock_listen(admin: bool) {
+    let server_sock = bind(
+        if admin {
+            "/run/clobberd-admin.sock"
+        } else {
+            "/run/clobberd.sock"
+        },
+        !admin,
+    )
+    .unwrap();
+
+    println!(
+        "Started socket {} server",
+        if admin { "admin" } else { "public" }
+    );
 
     loop {
         match server_sock.accept() {
             Ok((mut socket, addr)) => {
                 println!("Accepted connection from {:?}", addr);
-                thread::spawn(move || sock_communicate(&mut socket));
+                thread::spawn(move || {
+                    let mut buf = String::with_capacity(1024);
+                    match socket.read_to_string(&mut buf) {
+                        Ok(_size) => {
+                            let command = match serde_json::from_str::<Command>(&buf) {
+                                Ok(command) => command,
+                                Err(e) => panic!("Error parsing command: {:?}", e),
+                            };
+                            let result = if admin {
+                                sock_admin_communicate(command)
+                            } else {
+                                sock_communicate(command)
+                            };
+                            if let Err(e) = socket.write(
+                                serde_json::to_string(&result)
+                                    .unwrap_or("".to_string())
+                                    .as_bytes(),
+                            ) {
+                                println!("Error sending response: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            println!("Error reading from socket: {:?}", e);
+                        }
+                    }
+                });
             }
             Err(e) => {
                 println!("Error accepting socket connection: {:?}", e);
@@ -122,8 +168,10 @@ fn gpu_watch() {
         for device_number in 0..locks.len() as u32 {
             let processes = get_processes(&nvml, &mut system, device_number).unwrap_or(vec![]);
             if processes.iter().filter(|p| p.user.uid != 0).count() == 0 {
+                if locks[device_number as usize].is_some() {
+                    println!("Released lock on GPU {}", device_number);
+                }
                 locks[device_number as usize] = None;
-                println!("Released lock on GPU {}", device_number);
             } else {
                 for p in processes.iter() {
                     match &locks[device_number as usize] {
@@ -138,8 +186,8 @@ fn gpu_watch() {
                             if current != &p.user {
                                 kill_process(&mut system, p.pid);
                                 println!(
-                                    "Killed process pid: {}, uid: {} ({})",
-                                    p.pid, p.user.uid, p.user.name
+                                    "Killed process on GPU {}: pid: {}, uid: {} ({})",
+                                    device_number, p.pid, p.user.uid, p.user.name
                                 );
                             }
                         }
@@ -152,6 +200,7 @@ fn gpu_watch() {
 }
 
 fn main() {
-    thread::spawn(sock_listen);
+    thread::spawn(|| sock_listen(false));
+    thread::spawn(|| sock_listen(true));
     gpu_watch();
 }
