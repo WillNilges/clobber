@@ -1,3 +1,4 @@
+use comms::ClobberConfig;
 use comms::Command::*;
 use comms::Response::*;
 use comms::{Command, Response, User};
@@ -43,6 +44,7 @@ struct SharedState {
     devices: Vec<DeviceState>,
     queued_jobs: VecDeque<Job>,
     active_jobs: Vec<Job>,
+    config: ClobberConfig,
 }
 
 impl SharedState {
@@ -163,7 +165,11 @@ async fn remove_finished_jobs(shared_state: &mut SharedState) -> Vec<Job> {
     }
     shared_state.active_jobs.retain(|j| !remove.contains(&j));
     for job in &remove {
-        send_ping(job.owner.clone(), JobFinished { id: job.id });
+        send_ping(
+            shared_state.config.pings_api_key.clone(),
+            job.owner.clone(),
+            JobFinished { id: job.id },
+        );
     }
     remove
 }
@@ -187,11 +193,12 @@ async fn try_start_job(shared_state: &mut SharedState) {
         let pod = Pod::new(job.owner.uid as u32);
         match pod.image_exists(&job.image_id).await {
             Ok(exists) => {
+                let pings_api_key = shared_state.config.pings_api_key.clone();
                 if exists {
                     match start_job(shared_state, &pod, &mut job).await {
                         Ok(job) => {
                             println!("Starting Job {}", job.id);
-                            send_ping(job.owner.clone(), JobStarted { id: job.id });
+                            send_ping(pings_api_key, job.owner.clone(), JobStarted { id: job.id });
                         }
                         Err(e) => {
                             eprintln!("Error starting container for image {}: {}", job.image_id, e);
@@ -200,6 +207,7 @@ async fn try_start_job(shared_state: &mut SharedState) {
                 } else {
                     println!("Image {} for uid {} not found", job.image_id, job.owner.uid);
                     send_ping(
+                        pings_api_key,
                         job.owner,
                         JobCancelled {
                             id: job.id,
@@ -214,6 +222,7 @@ async fn try_start_job(shared_state: &mut SharedState) {
                     job.image_id, job.owner.uid, e
                 );
                 send_ping(
+                    shared_state.config.pings_api_key.clone(),
                     job.owner,
                     JobCancelled {
                         id: job.id,
@@ -291,6 +300,8 @@ fn accept_socket(sock: &UnixListener, shared_state: &mut SharedState) {
 
 #[tokio::main]
 async fn main() {
+    let config = comms::get_config().unwrap();
+
     let mut gpu = GPU::new();
 
     let server_sock = bind("/run/clobberd.sock").unwrap();
@@ -308,6 +319,7 @@ async fn main() {
             .collect(),
         queued_jobs: VecDeque::from([]),
         active_jobs: vec![],
+        config: config,
     };
 
     println!("Started Server");

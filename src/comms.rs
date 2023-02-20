@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ClobberConfig {
+    pub pings_api_key: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub enum Command {
     Status,
@@ -34,4 +39,12 @@ impl PartialEq for User {
     fn eq(&self, other: &User) -> bool {
         self.uid == other.uid
     }
+}
+
+pub fn get_config() -> Result<ClobberConfig, String> {
+    let file = match std::fs::read_to_string("/etc/clobber/config.json") {
+        Ok(f) => f,
+        Err(e) => return Err(e.to_string()),
+    };
+    serde_json::from_str::<ClobberConfig>(&file).map_err(|e| e.to_string())
 }
