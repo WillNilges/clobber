@@ -11,6 +11,7 @@ use std::io::prelude::*;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::thread;
+use std::time::Duration;
 use tokio::*;
 
 mod comms;
@@ -89,13 +90,18 @@ fn sock_communicate(shared_state: &mut SharedState, command: Command) -> Respons
             image_id,
             gpus,
         } => {
-            shared_state.queued_jobs.push_back(Job {
+            let job = Job {
                 id: rand::random(),
                 owner: user,
                 image_id: image_id,
                 requested_gpus: gpus,
                 container: None,
-            });
+            };
+            shared_state.queued_jobs.push_back(job.clone());
+            println!(
+                "Queued job {} from uid {} ({:?}) from image {}",
+                job.id, job.owner.uid, job.owner.name, job.image_id
+            );
             Success
         }
         #[allow(unreachable_patterns)] //Fallback
@@ -242,6 +248,12 @@ fn kill_rogue_gpu_processes(gpu: &mut GPU, shared_state: &mut SharedState) {
 fn accept_socket(sock: &UnixListener, shared_state: &mut SharedState) {
     match sock.accept() {
         Ok((mut socket, addr)) => {
+            socket
+                .set_read_timeout(Some(Duration::from_millis(1000)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_millis(1000)))
+                .unwrap();
             println!("Accepted connection from {:?}", addr);
             let mut buf = String::with_capacity(1024);
             match socket.read_to_string(&mut buf) {
