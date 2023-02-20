@@ -246,11 +246,14 @@ fn accept_socket(sock: &UnixListener, shared_state: &mut SharedState) {
             let mut buf = String::with_capacity(1024);
             match socket.read_to_string(&mut buf) {
                 Ok(_size) => {
-                    let command = match serde_json::from_str::<Command>(&buf) {
-                        Ok(command) => command,
-                        Err(e) => panic!("Error parsing command: {:?}", e),
+                    let result = match serde_json::from_str::<Command>(&buf) {
+                        Ok(command) => sock_communicate(shared_state, command),
+                        Err(e) => {
+                            let msg = format!("Error parsing command: {:?}", e);
+                            eprintln!("{}", msg);
+                            Error(msg)
+                        }
                     };
-                    let result = sock_communicate(shared_state, command);
                     if let Err(e) = socket.write(
                         serde_json::to_string(&result)
                             .unwrap_or_else(|e| {

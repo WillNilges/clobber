@@ -64,10 +64,10 @@ impl Pod {
             .get(container_id.clone())
             .inspect()
             .await
-            .map(|i| i.state.map(|s| s.running).flatten());
+            .map(|i| i.state.map(|s| s.status).flatten());
         match ret {
             Ok(val) => match val {
-                Some(r) => Ok(r),
+                Some(r) => Ok(r == "exited"),
                 None => Err("Could not determine state".into()),
             },
             Err(e) => Err(format!(
