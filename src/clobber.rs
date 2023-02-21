@@ -1,215 +1,175 @@
-use std::{collections::{HashMap, HashSet}, process::{Command, Stdio}};
-use nvml_wrapper::{Nvml,error::NvmlError};
-use users::get_user_by_uid;
-use sysinfo::{Pid, ProcessExt, System, SystemExt, Signal};
+use clap::{Parser, Subcommand};
 use colored::Colorize;
-use clap::Parser;
+use pod::*;
+use std::os::unix::net::UnixStream;
+
+mod comms;
+mod pod;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[clap(long, short, action)]
-    summary: bool,
-    #[clap(long, short, action)]
-    bug_users: bool,
-    #[clap(long, short, action)]
-    term_offenders: bool,
-    #[clap(long, short, action)]
-    kill_offenders: bool,
+    #[command(subcommand)]
+    command: Option<Commands>,
 }
 
-pub struct GPUprocess {
-    name: String,
-    pid: usize,
-    start_time: u64, 
-    device_number: usize,
-    uid: usize,
-    user: String
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Status,
+    Kill,
+    Watch {
+        #[arg(short, long)]
+        device: u8,
+    },
+    Unwatch {
+        #[arg(short, long)]
+        device: u8,
+    },
+    Queue {
+        #[arg(short, long)]
+        image: String,
+    },
 }
 
-fn main() -> Result<(), NvmlError> {
-    let args = Args::parse();
-    let nvml = Nvml::init()?;
-    let mut s = System::new_all();
-
-    let running_gpu_processes = get_processes(&nvml, &mut s)?;
-    if args.summary {
-        print_banner_summary(&nvml, &running_gpu_processes);
-    } else {
-        print_usage(&running_gpu_processes);
-    }
-
-    print_warnings(&running_gpu_processes, args.bug_users);
-
-    if args.term_offenders {
-        end_offenders(&mut s, &running_gpu_processes, Signal::Term);
-    } else if args.kill_offenders {
-        end_offenders(&mut s, &running_gpu_processes, Signal::Kill);
-    }
-    Ok(())
+#[link(name = "c")]
+extern "C" {
+    fn getuid() -> u32;
 }
 
-// Use the `write` command to annoy a user with a message
-// FIXME: Get rid of `expect`s
-fn write_to_user(user: String, message: String) {
-    let echo_child = Command::new("echo")
-        .arg(message)
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to start echo process while writing to user");
-
-    let echo_out = echo_child.stdout.expect("Failed to open echo stdout");
-
-    let write_child = Command::new("write")
-        .arg(user)
-        .stdin(Stdio::from(echo_out))
-        .spawn()
-        .expect("Failed to start wall process while writing to user");
-
-    let _output = write_child.wait_with_output();
-}
-
-// Query NVML for the processes running on all GPUs and build a list of them
-fn get_processes(nvml: &Nvml, system: &mut System) -> Result<Vec<GPUprocess>, NvmlError>{
-    let nvml_device_count = nvml.device_count().unwrap();
-    system.refresh_users_list();
-    let mut gpu_processes = vec![];
-    for device_number in 0..nvml_device_count {
-        let device = nvml.device_by_index(device_number).unwrap();
-        let nvml_processes = device.running_compute_processes_v2().unwrap();
-        for proc in nvml_processes {
-            if let Some(process) = system.process(Pid::from(proc.pid as usize)) {
-                let mut gpu_process = GPUprocess {
-                    name: process.name().to_string(),
-                    pid: proc.pid as usize,
-                    start_time: process.start_time(),
-                    device_number: device_number as usize,
-                    uid: 0,
-                    user: "Unknown".to_string()
-                };
-
-                // Sometimes, it's not a sure bet that a UID will be found. So we have to handle
-                // that.
-                if let Some(user_id) = process.user_id() {
-                    let user = get_user_by_uid(**user_id).unwrap();
-
-                    gpu_process.uid = **user_id as usize;
-                    gpu_process.user = user.name().to_string_lossy().to_string();
+fn print_response(response: comms::Response) {
+    use comms::Response::*;
+    match response {
+        Success => {}
+        Error(e) => eprintln!("Error: {}", e),
+        GPUStatus { locks } => {
+            for (index, gpu) in locks.iter().enumerate() {
+                if let Some(user) = gpu {
+                    println!(
+                        "{} {} {} {}",
+                        "GPU".yellow(),
+                        index.to_string().yellow().bold(),
+                        "is being used by".red(),
+                        user.name.yellow().bold()
+                    );
+                } else {
+                    println!(
+                        "{} {} {}",
+                        "GPU".yellow(),
+                        index.to_string().yellow().bold(),
+                        "is not being used".green()
+                    );
                 }
-                gpu_processes.push(gpu_process); 
             }
         }
+        ActiveJobs { jobs } => {}
     }
-    Ok(gpu_processes)
 }
 
-fn end_offenders(system: &mut System, processes: &Vec<GPUprocess>, signal: Signal) {
-    let mut gpus = HashMap::new();
-    for e in processes {
-        gpus.entry(e.device_number).or_insert(vec!()).push(e);
+fn send_command(command: comms::Command) {
+    use std::io::{Read, Write};
+    let mut sock = match UnixStream::connect("/run/clobberd.sock") {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error connecting to socket. Is clobberd running?\n{}", e);
+            return;
+        }
+    };
+
+    let json = match serde_json::to_string(&command) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("Error serializing to JSON? somehow: {}", e);
+            return;
+        }
+    };
+
+    if let Err(e) = sock.write(json.as_bytes()) {
+        eprintln!("Error writing to socket: {}", e);
     }
 
-    for (_gpu, processes) in gpus {
-        let oldest = processes.iter().min_by_key(|p| p.start_time).unwrap().start_time;
-        for process in processes {
-            if process.start_time > oldest {
-                kill_process(system, process.pid, signal);
-            }
+    sock.flush().unwrap();
+    sock.shutdown(std::net::Shutdown::Write).unwrap();
+
+    let mut buf = String::with_capacity(10 * 1024);
+    match sock.read_to_string(&mut buf) {
+        Ok(_size) => match serde_json::from_str::<comms::Response>(&buf) {
+            Ok(response) => print_response(response),
+            Err(e) => eprintln!("Error parsing response: {}", e),
+        },
+        Err(e) => {
+            eprintln!("Error reading from socket: {}", e);
         }
     }
 }
 
-fn kill_process(system: &mut System, pid: usize, signal: Signal) -> bool {
-    println!("{} {}", signal.to_string().red().bold(), pid.to_string().red().bold());
-    if let Some(process) = system.process(Pid::from(pid)) {
-        process.kill_with(signal);
-    }
-    true
-}
-
-// Print number of devices (GPUs) installed in the system
-fn print_device_count(nvml: &Nvml) {
-    let nvml_device_count = nvml.device_count().unwrap();
-    println!("Found {} devices.", nvml_device_count);
-}
-
-// Show a small banner, and print some more detailed info about what processes
-// are running on the GPU and who owns them
-fn print_banner_summary(nvml: &Nvml, processes: &Vec<GPUprocess>) {
-    println!("== CLOBBER ==");
-    print_device_count(&nvml);
-    for proc in processes {
-        println!(
-            "Found process \"{}\" ({}) on GPU {} started by {}!", 
-            proc.name, proc.pid, proc.device_number, proc.user.red()
+async fn find_image(uid: u32, image: String) -> Result<Option<String>, String> {
+    let pod = Pod::new(uid);
+    if let Err(e) = pod.ping().await {
+        eprintln!(
+            "Error connecting to podman: {}\n\nMaybe try {}",
+            e,
+            "systemctl enable --user --now podman.socket".green().bold()
         );
+        return Err("".to_string());
     }
-    
-    if processes.len() == 0 {
-        println!("{}", "There are no running GPU processes.".green());
-    }
+    pod.image_exists(image.clone())
+        .await
+        .map(|e| if e { Some(image) } else { None })
+        .map_err(|e| e.to_string())
 }
 
-// Print matter-of-fact information about who is using what GPU
-fn print_usage(processes: &Vec<GPUprocess>) {
-    let mut users = HashMap::new();
-    for e in processes {
-        users.entry(e.user.to_string()).or_insert(vec!()).push(&e.device_number);
-    }
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
 
-    for (user, mut gpus) in users {
-        let set: HashSet<_> = gpus.drain(..).collect(); // dedup
-        gpus.extend(set.into_iter());
+    let (uid, is_root) = unsafe { (getuid(), getuid() == 0) };
 
-        let mut gpu_string = format!("{:?}", gpus);
-        gpu_string = gpu_string.trim_start_matches('[').trim_end_matches(']').to_string();
-        println!("{} {} {}", user.yellow().bold(), "is currently using GPUs".yellow(), gpu_string.yellow().bold());
-    }
+    let username = "ethanf108";
 
-    if processes.len() == 0 {
-        println!("{}", "There are no running GPU processes.".green());
-    }
-}
-
-// Print a scary warning about colliding GPU processes, and optionally, use
-// the `write` command to annoy the users directly
-fn print_warnings(processes: &Vec<GPUprocess>, bug_users: bool) -> bool {
-    let mut warned = false;
-    // List of GPUs that have multiple processes running on them
-    // We can count on processes being sorted, since we go through the GPU IDs
-    // sequentially
-    let mut mult_proc = HashMap::new();
-    for e in processes {
-        mult_proc.entry(e.device_number).or_insert(vec!()).push(&e.user);
-    }
-
-    for (gpu_num, mut names) in mult_proc {
-        let mut write_message: String;
-        if names.len() > 1 {
-            write_message = format!(
-                    "{} {}",
-                    "WARNING! MULTIPLE PROCESSES DETECTED ON GPU".red().bold(), gpu_num.to_string().red().bold()
-                );
-
-            // Delete duplicate names in case someone has multiple processes running
-            let mut uniques = HashSet::new();
-            names.retain(|e| uniques.insert(*e));
-
-            write_message += &format!("{}", "\nPLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:".red()).to_string();
-            for user in &names {
-                write_message += &format!("\n- {}", user.red().bold());
-            }
-
-            println!("{}", write_message);
-            
-            if bug_users {
-                let names_string = &format!("{:?}", names).trim_start_matches('[').trim_end_matches(']').to_string();
-                for user in &names {
-                    write_to_user(user.to_string(), format!("WARNING! MULTIPLE PROCESSES DETECTED ON GPU {}\nPLEASE CONTACT THE FOLLOWING USERS TO COORDINATE WORKLOADS:\n{}", gpu_num.to_string(), names_string));
+    if let Some(command) = args.command {
+        use Commands::*;
+        match command {
+            Status => send_command(comms::Command::Status),
+            Kill => {
+                if !is_root {
+                    eprintln!("Permission denied.");
+                    return;
                 }
+                send_command(comms::Command::Kill);
             }
-            warned = true; // If this does something, then don't run show_usage
+            Watch { device } => {
+                if !is_root {
+                    eprintln!("Permission denied.");
+                    return;
+                }
+                send_command(comms::Command::SetWatch {
+                    device_number: device as u32,
+                    watching: true,
+                });
+            }
+            Unwatch { device } => {
+                if !is_root {
+                    eprintln!("Permission denied.");
+                    return;
+                }
+                send_command(comms::Command::SetWatch {
+                    device_number: device as u32,
+                    watching: false,
+                });
+            }
+            Queue { image } => match find_image(uid, image).await {
+                Ok(Some(image)) => send_command(comms::Command::QueueJob {
+                    user: comms::User {
+                        uid: uid as usize,
+                        name: username.to_string(),
+                    },
+                    image_id: image,
+                    gpus: vec![],
+                }),
+
+                Ok(None) => eprintln!("Cannot find image"),
+                Err(e) => eprintln!("Error finding image: {}", e),
+            },
         }
     }
-    warned
 }

@@ -13,6 +13,14 @@ impl Pod {
         }
     }
 
+    pub async fn ping(&self) -> Result<(), String> {
+        self.podman
+            .ping()
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     pub async fn image_exists(&self, image_id: impl Into<Id>) -> podman_api::Result<bool> {
         self.podman.images().get(image_id).exists().await
     }
