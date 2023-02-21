@@ -19,16 +19,22 @@ enum Commands {
     Status,
     Kill,
     Watch {
-        #[arg(short, long)]
+        #[arg(short, long, required = true)]
         device: u8,
     },
     Unwatch {
-        #[arg(short, long)]
+        #[arg(short, long, required = true)]
         device: u8,
     },
     Queue {
-        #[arg(short, long)]
+        #[arg(short, long, required = true)]
         image: String,
+        #[arg(short, long, required = true)]
+        gpus: Vec<u32>,
+    },
+    Jobs {
+        #[arg(short, long)]
+        all: bool,
     },
 }
 
@@ -41,7 +47,7 @@ fn print_response(response: comms::Response) {
     use comms::Response::*;
     match response {
         Success => {}
-        Error(e) => eprintln!("Error: {}", e),
+        Error(e) => eprintln!("Error: {}", e.red()),
         GPUStatus { locks } => {
             for (index, gpu) in locks.iter().enumerate() {
                 if let Some(user) = gpu {
@@ -62,7 +68,28 @@ fn print_response(response: comms::Response) {
                 }
             }
         }
-        ActiveJobs { jobs } => {}
+        ActiveJobs(jobs) => {
+            for job in jobs {
+                println!(
+                    "{} {} {} {} {}",
+                    "Job".yellow(),
+                    job.id.to_string().yellow().bold(),
+                    format!("({})", job.owner.name).green().bold(),
+                    "is using GPU(s)".yellow(),
+                    job.requested_gpus
+                        .iter()
+                        .map(|g| g.to_string())
+                        .reduce(|a, b| {
+                            let mut str = a.to_owned();
+                            str.push_str(&b.to_owned());
+                            str.push_str(", ");
+                            str
+                        })
+                        .unwrap_or("NONE".into())
+                        .green()
+                );
+            }
+        }
     }
 }
 
@@ -164,19 +191,26 @@ async fn main() {
                     watching: false,
                 });
             }
-            Queue { image } => match find_image(uid, image).await {
+            Queue { image, gpus } => match find_image(uid, image).await {
                 Ok(Some(image)) => send_command(comms::Command::QueueJob {
                     user: comms::User {
                         uid: uid as usize,
                         name: username.to_string(),
                     },
                     image_id: image,
-                    gpus: vec![],
+                    gpus: gpus,
                 }),
 
                 Ok(None) => eprintln!("Cannot find image"),
                 Err(e) => eprintln!("Error finding image: {}", e),
             },
+            Jobs { all } => {
+                if all {
+                    eprintln!("Not implemented yet :/");
+                } else {
+                    send_command(comms::Command::ActiveJobs);
+                }
+            }
         }
     }
 }

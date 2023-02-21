@@ -21,12 +21,19 @@ pub enum Command {
     ActiveJobs,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JobDesc {
+    pub id: u16,
+    pub owner: User,
+    pub requested_gpus: Vec<u32>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub enum Response {
     Success,
     Error(String),
     GPUStatus { locks: Vec<Option<User>> },
-    ActiveJobs { jobs: Vec<(u16, u32)> },
+    ActiveJobs(Vec<JobDesc>),
 }
 
 #[derive(Clone, Eq, Serialize, Deserialize)]

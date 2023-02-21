@@ -1,5 +1,4 @@
 use comms::ClobberConfig;
-use comms::Command::*;
 use comms::Response::*;
 use comms::{Command, Response, User};
 use gpu::GPU;
@@ -56,6 +55,7 @@ impl SharedState {
 }
 
 fn sock_communicate(shared_state: &mut SharedState, command: Command) -> Response {
+    use comms::Command::*;
     match command {
         Status => GPUStatus {
             locks: shared_state
@@ -92,6 +92,20 @@ fn sock_communicate(shared_state: &mut SharedState, command: Command) -> Respons
             image_id,
             gpus,
         } => {
+            if gpus.len() == 0 {
+                return Error("Must request at least one GPU".to_string());
+            }
+            for gpu in gpus.clone() {
+                if shared_state
+                    .devices
+                    .iter()
+                    .map(|d| d.device_number)
+                    .find(|n| n == &gpu)
+                    .is_none()
+                {
+                    return Error(format!("GPU {} not found", gpu));
+                }
+            }
             let job = Job {
                 id: rand::random(),
                 owner: user,
@@ -106,6 +120,17 @@ fn sock_communicate(shared_state: &mut SharedState, command: Command) -> Respons
             );
             Success
         }
+        ActiveJobs => comms::Response::ActiveJobs(
+            shared_state
+                .active_jobs
+                .iter()
+                .map(|j| comms::JobDesc {
+                    id: j.id,
+                    owner: j.owner.clone(),
+                    requested_gpus: j.requested_gpus.clone(),
+                })
+                .collect(),
+        ),
     }
 }
 
