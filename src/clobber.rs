@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use pod::*;
 use std::os::unix::net::UnixStream;
+use users::get_user_by_uid;
 
 mod comms;
 mod pod;
@@ -124,7 +125,13 @@ async fn main() {
 
     let (uid, is_root) = unsafe { (getuid(), getuid() == 0) };
 
-    let username = "ethanf108";
+    let username = match get_user_by_uid(uid) {
+        Some(user) => user.name().to_string_lossy().to_string(),
+        None => {
+            eprintln!("Error obtaining username.");
+            return;
+        }
+    };
 
     if let Some(command) = args.command {
         use Commands::*;

@@ -54,5 +54,4 @@ pub fn send_ping(api_token: String, user: User, ping: Ping) {
             );
         }
     });
-    //TODO implement
 }

@@ -106,11 +106,6 @@ fn sock_communicate(shared_state: &mut SharedState, command: Command) -> Respons
             );
             Success
         }
-        #[allow(unreachable_patterns)] //Fallback
-        _ => {
-            println!("Unimplemented command.");
-            Error("Unimplemented command".to_string())
-        }
     }
 }
 
