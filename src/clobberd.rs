@@ -286,9 +286,10 @@ fn accept_socket(sock: &UnixListener, shared_state: &mut SharedState) {
                         eprintln!("Error sending response: {}", e);
                     }
                 }
-                Err(e) => {
-                    eprintln!("Error reading from socket: {:?}", e);
-                }
+                Err(e) => match e.kind() {
+                    io::ErrorKind::WouldBlock => eprintln!("Timeout while reading from socket"),
+                    _ => eprintln!("Error reading from socket: {:?}", e),
+                },
             }
         }
         Err(e) => match e.kind() {
