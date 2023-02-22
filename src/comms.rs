@@ -19,6 +19,9 @@ pub enum Command {
         gpus: Vec<u32>,
     },
     ActiveJobs,
+    MyJobs {
+        uid: u32,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -34,6 +37,7 @@ pub enum Response {
     Error(String),
     GPUStatus { locks: Vec<Option<User>> },
     ActiveJobs(Vec<JobDesc>),
+    MyJobs(Vec<(u32, JobDesc)>), //(position in queue, job)
 }
 
 #[derive(Clone, Eq, Serialize, Deserialize)]

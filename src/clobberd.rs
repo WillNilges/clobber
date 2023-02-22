@@ -131,6 +131,24 @@ fn sock_communicate(shared_state: &mut SharedState, command: Command) -> Respons
                 })
                 .collect(),
         ),
+        MyJobs { uid } => comms::Response::MyJobs(
+            shared_state
+                .queued_jobs
+                .iter()
+                .enumerate()
+                .filter(|(_, j)| j.owner.uid == uid as usize)
+                .map(|(i, j)| {
+                    (
+                        i as u32,
+                        comms::JobDesc {
+                            id: j.id,
+                            owner: j.owner.clone(),
+                            requested_gpus: j.requested_gpus.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        ),
     }
 }
 

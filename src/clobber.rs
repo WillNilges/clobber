@@ -34,7 +34,7 @@ enum Commands {
     },
     Jobs {
         #[arg(short, long)]
-        all: bool,
+        active: bool,
     },
 }
 
@@ -87,6 +87,17 @@ fn print_response(response: comms::Response) {
                         })
                         .unwrap_or("NONE".into())
                         .green()
+                );
+            }
+        }
+        MyJobs(jobs) => {
+            for (index, job) in jobs {
+                println!(
+                    "{} {} {} {}",
+                    "Job".yellow(),
+                    job.id.to_string().yellow().bold(),
+                    "is in queue position".yellow(),
+                    (index + 1).to_string().yellow().bold()
                 );
             }
         }
@@ -204,11 +215,11 @@ async fn main() {
                 Ok(None) => eprintln!("Cannot find image"),
                 Err(e) => eprintln!("Error finding image: {}", e),
             },
-            Jobs { all } => {
-                if all {
-                    eprintln!("Not implemented yet :/");
-                } else {
+            Jobs { active } => {
+                if active {
                     send_command(comms::Command::ActiveJobs);
+                } else {
+                    send_command(comms::Command::MyJobs { uid: uid });
                 }
             }
         }
