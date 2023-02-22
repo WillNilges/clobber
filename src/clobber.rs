@@ -171,56 +171,56 @@ async fn main() {
         }
     };
 
-    if let Some(command) = args.command {
-        use Commands::*;
-        match command {
-            Status => send_command(comms::Command::Status),
-            Kill => {
-                if !is_root {
-                    eprintln!("Permission denied.");
-                    return;
-                }
-                send_command(comms::Command::Kill);
-            }
-            Watch { device } => {
-                if !is_root {
-                    eprintln!("Permission denied.");
-                    return;
-                }
-                send_command(comms::Command::SetWatch {
-                    device_number: device as u32,
-                    watching: true,
-                });
-            }
-            Unwatch { device } => {
-                if !is_root {
-                    eprintln!("Permission denied.");
-                    return;
-                }
-                send_command(comms::Command::SetWatch {
-                    device_number: device as u32,
-                    watching: false,
-                });
-            }
-            Queue { image, gpus } => match find_image(uid, image).await {
-                Ok(Some(image)) => send_command(comms::Command::QueueJob {
-                    user: comms::User {
-                        uid: uid as usize,
-                        name: username.to_string(),
-                    },
-                    image_id: image,
-                    gpus: gpus,
-                }),
+    use Commands::*;
 
-                Ok(None) => eprintln!("Cannot find image"),
-                Err(e) => eprintln!("Error finding image: {}", e),
-            },
-            Jobs { active } => {
-                if active {
-                    send_command(comms::Command::ActiveJobs);
-                } else {
-                    send_command(comms::Command::MyJobs { uid: uid });
-                }
+    let command = args.command.unwrap_or(Status);
+
+    match command {
+        Status => send_command(comms::Command::Status),
+        Kill => {
+            if !is_root {
+                eprintln!("Permission denied.");
+                return;
+            }
+            send_command(comms::Command::Kill);
+        }
+        Watch { device } => {
+            if !is_root {
+                eprintln!("Permission denied.");
+                return;
+            }
+            send_command(comms::Command::SetWatch {
+                device_number: device as u32,
+                watching: true,
+            });
+        }
+        Unwatch { device } => {
+            if !is_root {
+                eprintln!("Permission denied.");
+                return;
+            }
+            send_command(comms::Command::SetWatch {
+                device_number: device as u32,
+                watching: false,
+            });
+        }
+        Queue { image, gpus } => match find_image(uid, image).await {
+            Ok(Some(image)) => send_command(comms::Command::QueueJob {
+                user: comms::User {
+                    uid: uid as usize,
+                    name: username.to_string(),
+                },
+                image_id: image,
+                gpus: gpus,
+            }),
+            Ok(None) => eprintln!("Cannot find image"),
+            Err(e) => eprintln!("Error finding image: {}", e),
+        },
+        Jobs { active } => {
+            if active {
+                send_command(comms::Command::ActiveJobs);
+            } else {
+                send_command(comms::Command::MyJobs { uid: uid });
             }
         }
     }
