@@ -1,0 +1,9 @@
+[Unit]
+Description=Clobberd (@wilnil, @ethanf108). Beats u up if u use GPU when its not ur turn :)
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/clobberd
+
+[Install]
+WantedBy=default.target
